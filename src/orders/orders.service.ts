@@ -32,9 +32,8 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
   async create(createOrderDto: CreateOrderDto) {
     try {
       const productIds = createOrderDto.items.map((item) => item.productId);
-      const products: Product[] = await firstValueFrom(
-        this.productsClient.send({ cmd: 'validate_products' }, productIds),
-      );
+
+      const products = await this.getProductsByIds(productIds);
 
       const totalAmount = createOrderDto.items.reduce((acc, orderItem) => {
         const price = products.find(
@@ -127,6 +126,15 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
       where: {
         id,
       },
+      include: {
+        OrderItem: {
+          select: {
+            price: true,
+            quantity: true,
+            productId: true,
+          },
+        },
+      },
     });
 
     if (!order) {
@@ -136,7 +144,18 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
       });
     }
 
-    return order;
+    const productIds = order.OrderItem.map((orderItem) => orderItem.productId);
+
+    const products = await this.getProductsByIds(productIds);
+
+    return {
+      ...order,
+      OrderItem: order.OrderItem.map((orderItem) => ({
+        ...orderItem,
+        name: products.find((product) => product.id === orderItem.productId)
+          .name,
+      })),
+    };
   }
 
   async changeOrderStatus(changeOrderStatusDto: ChangeOrderStatusDto) {
@@ -156,5 +175,20 @@ export class OrdersService extends PrismaClient implements OnModuleInit {
         status,
       },
     });
+  }
+
+  private async getProductsByIds(productIds: number[]): Promise<Product[]> {
+    const products: Product[] = await firstValueFrom(
+      this.productsClient.send({ cmd: 'validate_products' }, productIds),
+    );
+
+    if (products.length !== productIds.length) {
+      throw new RpcException({
+        status: HttpStatus.BAD_REQUEST,
+        message: 'Invalid products',
+      });
+    }
+
+    return products;
   }
 }
